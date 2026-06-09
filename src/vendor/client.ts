@@ -90,20 +90,15 @@ export class Exayard {
       headers['Idempotency-Key'] = randomIdempotencyKey()
     }
 
-    const ac = new AbortController()
-    const timeout = setTimeout(() => ac.abort(), this.timeoutMs)
-
-    let res: Response
-    try {
-      res = await this.fetchImpl(url.toString(), {
-        method: opts.method,
-        headers,
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-        signal: ac.signal
-      })
-    } finally {
-      clearTimeout(timeout)
-    }
+    // AbortSignal.timeout() replaces a setTimeout + AbortController + clearTimeout:
+    // n8n's community-node lint forbids the setTimeout/clearTimeout globals, and
+    // this is the modern equivalent (Node >=18; package engines require >=20).
+    const res = await this.fetchImpl(url.toString(), {
+      method: opts.method,
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      signal: AbortSignal.timeout(this.timeoutMs)
+    })
 
     if (!res.ok) {
       const ct = res.headers.get('Content-Type') ?? ''
