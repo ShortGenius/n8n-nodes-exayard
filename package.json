@@ -1,0 +1,54 @@
+{
+  "name": "n8n-nodes-exayard",
+  "version": "0.3.1",
+  "description": "n8n community node for Exayard — AI-powered construction takeoffs, estimates, and bids.",
+  "keywords": [
+    "n8n-community-node-package",
+    "exayard",
+    "construction",
+    "estimating",
+    "takeoff"
+  ],
+  "license": "MIT",
+  "homepage": "https://exayard.com/integrations/n8n",
+  "author": {
+    "name": "Exayard",
+    "email": "support@exayard.com",
+    "url": "https://exayard.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShortGenius/n8n-nodes-exayard.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && npm run copy-icons",
+    "copy-icons": "node -e \"const fs=require('fs');const path=require('path');for (const dir of ['nodes/Exayard','nodes/ExayardTrigger']) { fs.mkdirSync(path.join('dist',dir),{recursive:true}); for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.svg'))) { fs.copyFileSync(path.join(dir,f), path.join('dist',dir,f)); } }\"",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/ExayardApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Exayard/Exayard.node.js",
+      "dist/nodes/ExayardTrigger/ExayardTrigger.node.js"
+    ]
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "n8n-workflow": "1.91.0",
+    "typescript": "5.9.3"
+  }
+}

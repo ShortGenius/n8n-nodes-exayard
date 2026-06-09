@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "module": "CommonJS",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "moduleResolution": "node",
+    "declaration": true,
+    "declarationMap": false,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "composite": false
+  },
+  "include": ["credentials/**/*.ts", "nodes/**/*.ts", "src/**/*.ts", "index.ts"],
+  "exclude": ["node_modules", "dist", "**/*.svg"]
+}

@@ -1,0 +1,161 @@
+import { Exayard as ExayardClient, constructWebhookEvent, WebhookSignatureError } from '../../src/vendor'
+import type {
+  IDataObject,
+  IHookFunctions,
+  INodeType,
+  INodeTypeDescription,
+  IWebhookFunctions,
+  IWebhookResponseData
+} from 'n8n-workflow'
+import { NodeOperationError } from 'n8n-workflow'
+
+/**
+ * Webhook trigger node for Exayard lifecycle events.
+ *
+ * On activate, registers a webhook endpoint at api.exayard.com pointing
+ * at the n8n production webhook URL. The endpoint secret returned by
+ * Exayard is stored in node static data so signature verification works
+ * across restarts.
+ *
+ * On deactivate, deletes the registered endpoint so we don't leak
+ * orphan webhook subscriptions on the Exayard side.
+ */
+export class ExayardTrigger implements INodeType {
+  description: INodeTypeDescription = {
+    displayName: 'Exayard Trigger',
+    name: 'exayardTrigger',
+    icon: 'file:ExayardTrigger.svg',
+    group: ['trigger'],
+    version: 1,
+    description: 'Triggers when an Exayard lifecycle event fires',
+    defaults: { name: 'Exayard Trigger' },
+    inputs: [] as INodeTypeDescription['inputs'],
+    outputs: ['main'] as INodeTypeDescription['outputs'],
+    credentials: [{ name: 'exayardApi', required: true }],
+    webhooks: [
+      {
+        name: 'default',
+        httpMethod: 'POST',
+        responseMode: 'onReceived',
+        path: 'webhook'
+      }
+    ],
+    properties: [
+      {
+        displayName: 'Organization ID',
+        name: 'organizationId',
+        type: 'string',
+        default: '',
+        required: true,
+        description: 'Exayard organization ID (org_...)'
+      },
+      {
+        displayName: 'Events',
+        name: 'events',
+        type: 'multiOptions',
+        default: ['project.created', 'assessment.completed', 'estimate.generated', 'bid.generated'],
+        options: [
+          { name: 'Project Created', value: 'project.created' },
+          { name: 'Project Updated', value: 'project.updated' },
+          { name: 'Project Archived', value: 'project.archived' },
+          { name: 'Takeoff Started', value: 'assessment.started' },
+          { name: 'Takeoff Completed', value: 'assessment.completed' },
+          { name: 'Takeoff Approved', value: 'assessment.approved' },
+          { name: 'Takeoff Cancelled', value: 'assessment.cancelled' },
+          { name: 'Takeoff Failed', value: 'assessment.failed' },
+          { name: 'Estimate Generated', value: 'estimate.generated' },
+          { name: 'Bid Generated', value: 'bid.generated' },
+          { name: 'File Processed', value: 'file.processed' },
+          { name: 'Quote Requested', value: 'quote.requested' },
+          { name: 'Quote Received', value: 'quote.received' },
+          { name: 'Quote Accepted', value: 'quote.accepted' },
+          { name: 'Quote Rejected', value: 'quote.rejected' },
+          { name: 'Quote Expired', value: 'quote.expired' },
+          { name: 'All Events', value: '*' }
+        ],
+        required: true
+      }
+    ]
+  }
+
+  webhookMethods = {
+    default: {
+      async checkExists(this: IHookFunctions): Promise<boolean> {
+        const data = this.getWorkflowStaticData('node')
+        return typeof data.endpointId === 'string'
+      },
+      async create(this: IHookFunctions): Promise<boolean> {
+        const credentials = await this.getCredentials('exayardApi')
+        const organizationId = this.getNodeParameter('organizationId') as string
+        const events = this.getNodeParameter('events') as string[]
+        const url = this.getNodeWebhookUrl('default')
+        if (!url) {
+          throw new NodeOperationError(this.getNode(), 'n8n did not provide a webhook URL.')
+        }
+        const client = new ExayardClient({
+          apiKey: credentials.apiKey as string,
+          baseUrl: (credentials.baseUrl as string) || undefined
+        })
+        const res = await client.webhooks.createEndpoint({
+          organizationId,
+          url,
+          events,
+          description: 'n8n trigger'
+        })
+        const data = this.getWorkflowStaticData('node')
+        data.endpointId = res.id
+        data.endpointSecret = res.secret
+        data.organizationId = organizationId
+        return true
+      },
+      async delete(this: IHookFunctions): Promise<boolean> {
+        const data = this.getWorkflowStaticData('node')
+        if (typeof data.endpointId !== 'string' || typeof data.organizationId !== 'string') {
+          return true
+        }
+        const credentials = await this.getCredentials('exayardApi')
+        const client = new ExayardClient({
+          apiKey: credentials.apiKey as string,
+          baseUrl: (credentials.baseUrl as string) || undefined
+        })
+        try {
+          await client.webhooks.deleteEndpoint(data.endpointId, { organizationId: data.organizationId })
+        } catch {
+          // Best-effort cleanup; Exayard might have already removed the endpoint.
+        }
+        delete data.endpointId
+        delete data.endpointSecret
+        delete data.organizationId
+        return true
+      }
+    }
+  }
+
+  async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
+    const req = this.getRequestObject()
+    const signature = (req.headers['exayard-signature'] || req.headers['Exayard-Signature']) as string | undefined
+    const data = this.getWorkflowStaticData('node')
+    const secret = data.endpointSecret as string | undefined
+
+    if (!signature || !secret) {
+      // Missing secret usually means the workflow was activated without
+      // the create() hook completing — return 400 so Exayard retries
+      // until the secret is in place.
+      return { webhookResponse: { status: 400, body: { error: 'missing_signature_or_secret' } } }
+    }
+
+    const rawBody = JSON.stringify(this.getBodyData())
+    try {
+      const event = await constructWebhookEvent(rawBody, signature, secret)
+      return { workflowData: [[{ json: event as unknown as IDataObject }]] }
+    } catch (err) {
+      if (err instanceof WebhookSignatureError) {
+        // 401 tells Exayard the signature failed; it will retry with
+        // exponential backoff up to 3 days, but in practice signature
+        // failures mean a config issue and should be loud.
+        return { webhookResponse: { status: 401, body: { error: err.code, detail: err.message } } }
+      }
+      throw err
+    }
+  }
+}

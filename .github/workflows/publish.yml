@@ -1,0 +1,40 @@
+name: Publish
+
+# Publishes n8n-nodes-exayard to npm WITH provenance. Provenance (the signed
+# "built from this commit in CI" attestation) is what n8n's community-node
+# verification requires, and npm only accepts it from a PUBLIC source repo —
+# which is why this package lives in its own public repo rather than the app
+# monorepo.
+#
+# Trigger: bump the version in package.json, then run this workflow manually
+# (Actions → Publish → Run workflow), or publish a GitHub Release.
+# Required secret: NPM_TOKEN (npm automation/granular token with publish rights).
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      # --ignore-scripts skips dependency native builds (n8n-workflow pulls
+      # isolated-vm, which we don't need to compile — tsc only reads its types).
+      - run: npm install --ignore-scripts
+
+      # prepublishOnly runs the build; --provenance emits the attestation.
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
