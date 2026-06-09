@@ -163,8 +163,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['estimate'], operation: ['generate'] } }
       },
       {
@@ -207,8 +207,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['bid'], operation: ['generate'] } }
       },
       {
@@ -250,8 +250,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['vendorPrice'], operation: ['set'] } }
       },
       {
@@ -340,8 +340,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['quote'], operation: ['create'] } }
       },
       {
@@ -433,8 +433,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['quote'], operation: ['receive'] } }
       },
       {
@@ -503,8 +503,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['quote'], operation: ['updateStatus'] } }
       },
       {
@@ -565,8 +565,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['assessment'], operation: ['run'] } }
       },
       {
@@ -593,8 +593,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['assessment'], operation: ['propose'] } }
       },
       {
@@ -629,8 +629,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['project', 'webhook'] } }
       },
       // Project: Get / Archive / Export / List Pages — ID
@@ -745,8 +745,8 @@ export class Exayard implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)',
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.',
         displayOptions: { show: { resource: ['file'], operation: ['upload'] } }
       },
       {
@@ -777,6 +777,26 @@ export class Exayard implements INodeType {
       baseUrl: (credentials.baseUrl as string) || undefined
     })
 
+    // Organization id: use the explicit field if set, otherwise derive it from
+    // the API key via GET /me (first membership) — matching the Zapier and Make
+    // connectors, where users never paste an org id. Resolved once and cached.
+    let cachedOrgId: string | undefined
+    const resolveOrg = async (itemIndex: number): Promise<string> => {
+      const explicit = (this.getNodeParameter('organizationId', itemIndex, '') as string).trim()
+      if (explicit) return explicit
+      if (cachedOrgId) return cachedOrgId
+      const me = (await client.me.get()) as { memberships?: Array<{ orgId?: string }> }
+      const derived = me.memberships?.[0]?.orgId
+      if (!derived) {
+        throw new NodeOperationError(
+          this.getNode(),
+          'Could not determine an organization for this API key. Use an organization-scoped key, or set the Organization ID field.'
+        )
+      }
+      cachedOrgId = derived
+      return cachedOrgId
+    }
+
     const items = this.getInputData()
     const out: INodeExecutionData[] = []
 
@@ -790,7 +810,7 @@ export class Exayard implements INodeType {
         if (resource === 'me') {
           result = await client.me.get()
         } else if (resource === 'project') {
-          const organizationId = this.getNodeParameter('organizationId', i) as string
+          const organizationId = await resolveOrg(i)
           if (operation === 'list') {
             const status = this.getNodeParameter('status', i, '') as string
             const search = this.getNodeParameter('search', i, '') as string
@@ -819,7 +839,7 @@ export class Exayard implements INodeType {
             result = await client.projects.export(projectId, { organizationId })
           }
         } else if (resource === 'webhook') {
-          const organizationId = this.getNodeParameter('organizationId', i) as string
+          const organizationId = await resolveOrg(i)
           if (operation === 'list') {
             result = await client.webhooks.listEndpoints({ organizationId })
           } else if (operation === 'create') {
@@ -843,7 +863,7 @@ export class Exayard implements INodeType {
         } else if (resource === 'assessment') {
           if (operation === 'run') {
             const projectId = this.getNodeParameter('projectId', i) as string
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const pageIds = (this.getNodeParameter('pageIds', i, '') as string)
               .split(',')
               .map(s => s.trim())
@@ -855,7 +875,7 @@ export class Exayard implements INodeType {
             result = await client.assessments.run(projectId, { organizationId, pageIds, elements })
           } else if (operation === 'propose') {
             const projectId = this.getNodeParameter('projectId', i) as string
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const prompt = this.getNodeParameter('prompt', i) as string
             const pageIds = (this.getNodeParameter('pageIds', i, '') as string)
               .split(',')
@@ -881,7 +901,7 @@ export class Exayard implements INodeType {
           }
         } else if (resource === 'estimate') {
           if (operation === 'generate') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const projectId = this.getNodeParameter('projectId', i) as string
             const query = this.getNodeParameter('query', i) as string
             const notes = this.getNodeParameter('notes', i, '') as string
@@ -895,7 +915,7 @@ export class Exayard implements INodeType {
           }
         } else if (resource === 'bid') {
           if (operation === 'generate') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const projectId = this.getNodeParameter('projectId', i) as string
             const notes = this.getNodeParameter('notes', i, '') as string
             const measurementContext = this.getNodeParameter('measurementContext', i, '') as string
@@ -909,7 +929,7 @@ export class Exayard implements INodeType {
           }
         } else if (resource === 'vendorPrice') {
           if (operation === 'set') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const productId = this.getNodeParameter('productId', i) as string
             const vendorId = this.getNodeParameter('vendorId', i) as string
             const pricePerUnit = this.getNodeParameter('pricePerUnit', i) as number
@@ -941,7 +961,7 @@ export class Exayard implements INodeType {
             return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined
           }
           if (operation === 'create') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const projectId = this.getNodeParameter('projectId', i) as string
             const vendorId = this.getNodeParameter('vendorId', i) as string
             const quoteNumber = this.getNodeParameter('quoteNumber', i) as string
@@ -965,7 +985,7 @@ export class Exayard implements INodeType {
               notes: notes || undefined
             })
           } else if (operation === 'receive') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const quoteId = this.getNodeParameter('quoteId', i) as string
             const lineItems = parseLineItems(this.getNodeParameter('lineItems', i, '[]') as string | unknown[]) ?? []
             const subtotal = this.getNodeParameter('subtotal', i) as number
@@ -983,14 +1003,14 @@ export class Exayard implements INodeType {
               validUntil: validUntil || undefined
             })
           } else if (operation === 'updateStatus') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const quoteId = this.getNodeParameter('quoteId', i) as string
             const status = this.getNodeParameter('status', i) as 'accepted' | 'rejected' | 'expired'
             result = await client.quotes.updateStatus(quoteId, { organizationId, status })
           }
         } else if (resource === 'file') {
           if (operation === 'upload') {
-            const organizationId = this.getNodeParameter('organizationId', i) as string
+            const organizationId = await resolveOrg(i)
             const projectId = this.getNodeParameter('projectId', i) as string
             const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string
             const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName)

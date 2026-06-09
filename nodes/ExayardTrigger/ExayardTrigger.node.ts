@@ -46,8 +46,8 @@ export class ExayardTrigger implements INodeType {
         name: 'organizationId',
         type: 'string',
         default: '',
-        required: true,
-        description: 'Exayard organization ID (org_...)'
+        required: false,
+        description: 'Exayard organization ID (org_...). Leave blank to derive it from the API key.'
       },
       {
         displayName: 'Events',
@@ -86,7 +86,6 @@ export class ExayardTrigger implements INodeType {
       },
       async create(this: IHookFunctions): Promise<boolean> {
         const credentials = await this.getCredentials('exayardApi')
-        const organizationId = this.getNodeParameter('organizationId') as string
         const events = this.getNodeParameter('events') as string[]
         const url = this.getNodeWebhookUrl('default')
         if (!url) {
@@ -96,6 +95,19 @@ export class ExayardTrigger implements INodeType {
           apiKey: credentials.apiKey as string,
           baseUrl: (credentials.baseUrl as string) || undefined
         })
+        // Org id: explicit field, or derived from the API key via GET /me — the
+        // same behavior as the Zapier and Make connectors.
+        let organizationId = (this.getNodeParameter('organizationId', '') as string).trim()
+        if (!organizationId) {
+          const me = (await client.me.get()) as { memberships?: Array<{ orgId?: string }> }
+          organizationId = me.memberships?.[0]?.orgId ?? ''
+          if (!organizationId) {
+            throw new NodeOperationError(
+              this.getNode(),
+              'Could not determine an organization for this API key. Use an organization-scoped key, or set the Organization ID field.'
+            )
+          }
+        }
         const res = await client.webhooks.createEndpoint({
           organizationId,
           url,
