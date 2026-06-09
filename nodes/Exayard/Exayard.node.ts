@@ -16,6 +16,7 @@ export class Exayard implements INodeType {
     icon: 'file:Exayard.svg',
     group: ['transform'],
     version: 1,
+    usableAsTool: true,
     subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
     description: 'AI-powered construction takeoffs, estimates, and bids',
     defaults: { name: 'Exayard' },
