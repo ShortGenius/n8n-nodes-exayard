@@ -1,4 +1,9 @@
-import type { ICredentialType, INodeProperties } from 'n8n-workflow'
+import type {
+  IAuthenticateGeneric,
+  ICredentialTestRequest,
+  ICredentialType,
+  INodeProperties
+} from 'n8n-workflow'
 
 /**
  * Credential type for the Exayard n8n nodes.
@@ -31,4 +36,24 @@ export class ExayardApi implements ICredentialType {
       description: 'Override only if you are pointing at a non-production deployment.'
     }
   ]
+
+  // Sends the key as `Authorization: Bearer <key>` on credential-test and any
+  // declarative request that uses this credential.
+  authenticate: IAuthenticateGeneric = {
+    type: 'generic',
+    properties: {
+      headers: {
+        Authorization: '=Bearer {{$credentials.apiKey}}'
+      }
+    }
+  }
+
+  // Powers the "Test" button: a lightweight GET /me that 200s for a valid key
+  // and 401s for a bad one.
+  test: ICredentialTestRequest = {
+    request: {
+      baseURL: '={{$credentials.baseUrl}}',
+      url: '/me'
+    }
+  }
 }
