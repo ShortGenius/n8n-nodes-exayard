@@ -1054,21 +1054,30 @@ export class Exayard implements INodeType {
           push(result)
         }
       } catch (err) {
+        const message =
+          err instanceof ExayardError
+            ? `${err.title} (${err.code}): ${err.detail}`
+            : err instanceof Error
+              ? err.message
+              : String(err)
+        // Per-item Continue On Fail: emit the error as this item's output and
+        // keep going, so prior items' results survive and later items still run.
+        if (this.continueOnFail()) {
+          out.push({
+            json: { error: message, ...(err instanceof ExayardError ? { code: err.code, status: err.status } : {}) },
+            pairedItem: { item: i }
+          })
+          continue
+        }
         if (err instanceof ExayardError) {
           // Surface RFC 9457 problem+json fields verbatim so workflow
-          // branches can read code / detail / doc_url. Re-throw as a
-          // NodeOperationError so n8n's standard error handling kicks in
-          // (Continue On Fail, etc.).
-          throw new NodeOperationError(
-            this.getNode(),
-            `${err.title} (${err.code}): ${err.detail}`,
-            {
-              itemIndex: i,
-              description: err.docUrl ? `See ${err.docUrl}` : undefined
-            }
-          )
+          // branches can read code / detail / doc_url.
+          throw new NodeOperationError(this.getNode(), message, {
+            itemIndex: i,
+            description: err.docUrl ? `See ${err.docUrl}` : undefined
+          })
         }
-        throw err
+        throw new NodeOperationError(this.getNode(), err as Error, { itemIndex: i })
       }
     }
 

@@ -82,7 +82,27 @@ export class ExayardTrigger implements INodeType {
     default: {
       async checkExists(this: IHookFunctions): Promise<boolean> {
         const data = this.getWorkflowStaticData('node')
-        return typeof data.endpointId === 'string'
+        if (typeof data.endpointId !== 'string' || typeof data.organizationId !== 'string') {
+          return false
+        }
+        // Confirm the endpoint still exists on the Exayard side — if it was
+        // deleted from the dashboard, clear local state and return false so
+        // n8n re-runs create() instead of staying silently dead.
+        const credentials = await this.getCredentials('exayardApi')
+        const client = new ExayardClient({
+          apiKey: credentials.apiKey as string,
+          baseUrl: (credentials.baseUrl as string) || undefined
+        })
+        const endpoints = (await client.webhooks.listEndpoints({
+          organizationId: data.organizationId
+        })) as Array<{ _id?: string }>
+        const exists = endpoints.some(e => e._id === data.endpointId)
+        if (!exists) {
+          delete data.endpointId
+          delete data.endpointSecret
+          delete data.organizationId
+        }
+        return exists
       },
       async create(this: IHookFunctions): Promise<boolean> {
         const credentials = await this.getCredentials('exayardApi')
@@ -145,18 +165,29 @@ export class ExayardTrigger implements INodeType {
 
   async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
     const req = this.getRequestObject()
+    const res = this.getResponseObject()
     const signature = (req.headers['exayard-signature'] || req.headers['Exayard-Signature']) as string | undefined
     const data = this.getWorkflowStaticData('node')
     const secret = data.endpointSecret as string | undefined
 
+    // Failure statuses must be written to the response object directly —
+    // returning `webhookResponse` sends it as the response BODY with the
+    // default 200 status, and Exayard treats any 2xx as delivered (no retry).
     if (!signature || !secret) {
       // Missing secret usually means the workflow was activated without
-      // the create() hook completing — return 400 so Exayard retries
-      // until the secret is in place.
-      return { webhookResponse: { status: 400, body: { error: 'missing_signature_or_secret' } } }
+      // the create() hook completing — 400 makes Exayard retry until the
+      // secret is in place.
+      res.status(400).json({ error: 'missing_signature_or_secret' })
+      return { noWebhookResponse: true }
     }
 
-    const rawBody = JSON.stringify(this.getBodyData())
+    // Verify against the exact wire bytes Exayard signed. n8n exposes them
+    // as req.rawBody; re-serializing the parsed body is only a fallback —
+    // it matches today's payloads but is not byte-stable in general.
+    if (!req.rawBody) {
+      await req.readRawBody?.()
+    }
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(this.getBodyData())
     try {
       const event = await constructWebhookEvent(rawBody, signature, secret)
       return { workflowData: [[{ json: event as unknown as IDataObject }]] }
@@ -165,7 +196,8 @@ export class ExayardTrigger implements INodeType {
         // 401 tells Exayard the signature failed; it will retry with
         // exponential backoff up to 3 days, but in practice signature
         // failures mean a config issue and should be loud.
-        return { webhookResponse: { status: 401, body: { error: err.code, detail: err.message } } }
+        res.status(401).json({ error: err.code, detail: err.message })
+        return { noWebhookResponse: true }
       }
       throw err
     }

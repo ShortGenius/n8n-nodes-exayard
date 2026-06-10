@@ -146,8 +146,10 @@ export class Exayard {
       this.request<{ id: string; _id: string }>({ method: 'POST', path: '/projects', body, idempotencyKey: opts.idempotencyKey }),
     export: (id: string, query: { organizationId: string }) =>
       this.request<unknown>({ method: 'GET', path: `/projects/${id}/export`, query }),
+    // Archiving is a soft-delete: DELETE /projects/{id} (there is no
+    // /projects/{id}/archive route; only POST /projects/{id}/restore exists).
     archive: (id: string, query: { organizationId: string }) =>
-      this.request<void>({ method: 'POST', path: `/projects/${id}/archive`, query })
+      this.request<void>({ method: 'DELETE', path: `/projects/${id}`, query })
   }
 
   // File upload is a 3-step dance: presign → PUT bytes to R2 → confirm (which
