@@ -1,6 +1,6 @@
 import { Exayard as ExayardClient, ExayardError } from '../../src/vendor'
-import type { IDataObject, IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription } from 'n8n-workflow'
-import { NodeOperationError } from 'n8n-workflow'
+import type { IDataObject, IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription, JsonObject } from 'n8n-workflow'
+import { NodeApiError, NodeOperationError } from 'n8n-workflow'
 
 /**
  * Action node for the Exayard API.
@@ -1070,12 +1070,26 @@ export class Exayard implements INodeType {
           continue
         }
         if (err instanceof ExayardError) {
-          // Surface RFC 9457 problem+json fields verbatim so workflow
-          // branches can read code / detail / doc_url.
-          throw new NodeOperationError(this.getNode(), message, {
-            itemIndex: i,
-            description: err.docUrl ? `See ${err.docUrl}` : undefined
-          })
+          // Vendored SDK HTTP error → n8n's convention is NodeApiError. Extract
+          // the RFC 9457 problem+json fields into a JsonObject so workflow
+          // branches can read status / code / detail / doc_url.
+          throw new NodeApiError(
+            this.getNode(),
+            {
+              status: err.status,
+              code: err.code,
+              title: err.title,
+              detail: err.detail,
+              doc_url: err.docUrl,
+              request_id: err.requestId
+            } as JsonObject,
+            {
+              itemIndex: i,
+              message,
+              httpCode: err.status ? String(err.status) : undefined,
+              description: err.docUrl ? `See ${err.docUrl}` : undefined
+            }
+          )
         }
         throw new NodeOperationError(this.getNode(), err as Error, { itemIndex: i })
       }
